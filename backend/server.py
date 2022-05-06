@@ -10,6 +10,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from simulator.ideal_gas import IdealGasSystem
 from simulator.wave import Wave2DSystem
+from simulator.sph import SPHSystem
 
 
 app = FastAPI()
@@ -17,6 +18,7 @@ app = FastAPI()
 class SimulatorList(Enum):
     IDEAL_GAS_SYSTEM = 'ideal_gas_system'
     WAVE_2D_SYSTEM = 'wave_2d_system'
+    SPH_SYSTEM = 'sph_system'
 
 class ConnectionManager:
     def __init__(self):
@@ -108,6 +110,9 @@ async def ws_simulate(
                 dx=0.25,
                 dz=0.25,
             )
+            g_simulators[id(target_simulator)] = target_simulator
+        elif simulator == SimulatorList.SPH_SYSTEM:
+            target_simulator = SPHSystem(n_particles=500)
             g_simulators[id(target_simulator)] = target_simulator
         prev_dt = cur_dt = datetime.now()
         while True:
