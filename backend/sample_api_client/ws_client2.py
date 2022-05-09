@@ -18,11 +18,7 @@ class WebsocketClient():
         self.ws.on_open = self.on_open
 
     def on_message(self, ws, message):
-        # print("receive : {}".format(message))
-        message = json.loads(message)
-        print(message.keys())
-        print(f'time : {message["time"]}')
-        print(np.array(message['positions'])[0, 0])
+        print("receive : {}".format(message))
 
     def on_error(self, ws, error):
         print(error)
@@ -31,16 +27,16 @@ class WebsocketClient():
         print(f'close : {close_msg}')
 
     def on_open(self, ws):
+        print('on_open')
         self._running = True
         Thread(
             target=self.run
         ).start()
 
     def run(self):
-        # while self._running:
-        #     time.sleep(0.1)
-        time.sleep(10)
-        self.ws.send('close')
+        while self._running:
+            time.sleep(4)
+            self.ws.send('ws_client')
         self.ws.close()
         print("thread terminating...")
 
@@ -48,5 +44,5 @@ class WebsocketClient():
         self.ws.run_forever()
 
 
-ws_client = WebsocketClient("ws://localhost:8000/simulate/ideal_gas_system")
+ws_client = WebsocketClient("ws://localhost:8000/wstest")
 ws_client.run_forever()

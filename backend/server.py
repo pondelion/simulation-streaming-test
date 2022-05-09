@@ -1,7 +1,8 @@
 import asyncio
 from datetime import datetime
+from email.errors import MessageError
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 import time
 from threading import Thread
 import json
@@ -43,31 +44,39 @@ class ConnectionManager:
 
 class WSMessageHandler:
 
-    def __init__(self, websocket):
+    def __init__(self, websocket, simulator, connection_manager, min_dt, max_dt):
         self._ws = websocket
+        self._simulator = simulator
+        self._connection_manager = connection_manager
         self._is_connected = True
+        self._max_dt = max_dt
+        self._min_dt = min_dt
 
-    def start_message_receive_loop(self) -> None:
-        # Thread(
-        #     target=self.message_receive_loop
-        # ).start()
-        # loop = asyncio.new_event_loop()
-        # asyncio.set_event_loop(loop)
-        # loop.run_until_complete(self.message_receive_loop())
-        # loop.close()
-        # asyncio.get_event_loop().create_task(self.message_receive_loop())
-        pass
-
-    async def message_receive_loop(self) -> None:
-        print('message_receive_loop')
+    async def message_send_task(self) -> None:
+        prev_dt = cur_dt = datetime.now()
         while self._is_connected:
-            print('message_receive_loop loop')
-            data = await self._ws.receive_text()
-            # data = self._ws.receive_text()
-            print(f'received message : {data}')
-            if data == 'close':
-                print('disconnecting')
+            cur_dt = datetime.now()
+            dt = (cur_dt - prev_dt).total_seconds()
+            dt = min(self._max_dt, dt)
+            # print(f'dt : {dt}')
+            self._simulator.update(dt=dt)
+            states = self._simulator.get_states()
+            states['simulator_id'] = id(self._simulator)
+            await self._ws.send_json(states)
+            prev_dt = cur_dt
+            wait_time = self._min_dt-(datetime.now()-cur_dt).total_seconds()
+            wait_time = max(0, wait_time)
+            await asyncio.sleep(wait_time)
+
+    async def message_receive_task(self) -> None:
+        while self._is_connected:
+            msg_received = await self._ws.receive_text()
+            print(f'received msg : {msg_received}')
+            if msg_received == 'close':
+                print('received close message')
+                self._connection_manager.disconnect(self._ws)
                 self._is_connected = False
+                break
 
     @property
     def is_connected(self) -> bool:
@@ -94,8 +103,6 @@ async def ws_simulate(
     print(f'simulator_id : {simulator_id}')
     global g_simulators
     await manager.connect(websocket)
-    message_handler = WSMessageHandler(websocket)
-    message_handler.start_message_receive_loop()
     try:
         if simulator == SimulatorList.IDEAL_GAS_SYSTEM:
             ig_simulator = IdealGasSystem(
@@ -114,29 +121,14 @@ async def ws_simulate(
         elif simulator == SimulatorList.SPH_SYSTEM:
             target_simulator = SPHSystem(n_particles=500)
             g_simulators[id(target_simulator)] = target_simulator
-        prev_dt = cur_dt = datetime.now()
-        while True:
-            cur_dt = datetime.now()
-            dt = (cur_dt - prev_dt).total_seconds()
-            dt = min(max_dt, dt)
-            # print(f'dt : {dt}')
-            target_simulator.update(dt=dt)
-            states = target_simulator.get_states()
-            states['simulator_id'] = id(simulator)
-            await websocket.send_json(states)
-            msg_received = await websocket.receive_text()
-            if msg_received == 'close':
-                print('received close message')
-                manager.disconnect(websocket)
-                break
-            # print(states['time'])
-            prev_dt = cur_dt
-            wait_time = min_dt-(datetime.now()-cur_dt).total_seconds()
-            wait_time = max(0, wait_time)
-            # time.sleep(wait_time)
-            #print(len(manager.active_connections))
+
+        message_handler = WSMessageHandler(websocket, target_simulator, manager, min_dt, max_dt)
+
+        L = await asyncio.gather(
+            message_handler.message_send_task(),
+            message_handler.message_receive_task(),
+        )
     except (WebSocketDisconnect, Exception) as e:
         print(e)
         manager.disconnect(websocket)
         # await manager.broadcast(f"Client #{client_id} left the chat")
-        # websockets.exceptions.ConnectionClosedError
